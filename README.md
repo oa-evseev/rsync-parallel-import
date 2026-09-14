@@ -299,13 +299,18 @@ from its manifested source file, which is normal import behavior.
 
 ## Tests
 
-The test suite uses standard-library `unittest`, temporary fixtures, fake
-subprocess runners, and no SSH server:
+After installing the package from the checkout, run the complete test suite
+with:
 
 ```console
-PYTHONPATH=src python3 -m unittest discover -v
-PYTHONPATH=src python3 -m compileall -q src tests
+python -m unittest discover -v
 ```
+
+The tests use standard-library `unittest`, temporary fixtures, fake subprocess
+runners, and no SSH server. Local `rsync` is required for the real local-rsync
+integration tests. CI installs rsync and runs the suite on Python 3.11, 3.12,
+and 3.13. The same lightweight source checks used by CI can be run with
+`python -m compileall -q src tests` and `python -m tabnanny src tests`.
 
 It covers strict TOML parsing, manifests and unusual Unix names, deterministic
 and atomic persistence, locking, byte balancing, rate/ETA and persistent
