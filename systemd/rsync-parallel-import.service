@@ -1,0 +1,26 @@
+[Unit]
+Description=Resumable parallel rsync import
+Wants=network-online.target
+After=network-online.target
+StartLimitIntervalSec=30min
+StartLimitBurst=5
+
+[Service]
+Type=simple
+# Choose a dedicated unprivileged account and provision its permissions/SSH separately.
+User=rsync-import
+Group=rsync-import
+ExecStart=/usr/local/bin/rsync-parallel-import --config /etc/rsync-parallel-import.toml run
+Restart=on-failure
+RestartSec=30s
+TimeoutStopSec=90s
+KillSignal=SIGTERM
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+# Adjust these two paths to match the configured destination and state directory.
+ReadWritePaths=/srv/import /var/lib/rsync-parallel-import
+
+[Install]
+WantedBy=multi-user.target

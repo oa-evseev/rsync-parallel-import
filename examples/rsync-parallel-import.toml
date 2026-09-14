@@ -1,0 +1,21 @@
+[source]
+host = "source.example.net"
+user = "importer"
+path = "/srv/export"
+# Each array element is one ssh argv token. Credentials are not configured here.
+ssh_options = ["-o", "BatchMode=yes", "-o", "ConnectTimeout=15"]
+
+[destination]
+path = "/srv/import"
+
+[state]
+path = "/var/lib/rsync-parallel-import"
+
+[transfer]
+workers = 16
+max_attempts = 5
+backoff_initial_seconds = 5
+backoff_max_seconds = 300
+poll_interval_seconds = 2
+rate_window_seconds = 60
+
