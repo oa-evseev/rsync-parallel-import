@@ -72,6 +72,7 @@ def status_record(config: Config) -> dict[str, Any]:
             "failed_count": 0,
             "failed_items": [],
             "last_error": None,
+            "last_transient_error": None,
         }
     if not manifest_path.exists() or not state_path.exists():
         raise ImporterError(
@@ -111,6 +112,7 @@ def status_record(config: Config) -> dict[str, Any]:
         "failed_items": failed_items,
         "thresholds_emitted": sorted(state.thresholds_emitted),
         "last_error": state.last_error,
+        "last_transient_error": state.last_transient_error,
     }
 
 
@@ -126,7 +128,11 @@ def human_status(record: dict[str, Any]) -> str:
     )
     details = []
     if record.get("last_error"):
-        details.append(f"last error: {record['last_error']}")
+        details.append(f"current error: {record['last_error']}")
+    if record.get("last_transient_error") and (
+        record["last_transient_error"] != record.get("last_error")
+    ):
+        details.append(f"historical transient error: {record['last_transient_error']}")
     for item in record.get("failed_items", [])[:10]:
         details.append(f"failed: {item['path']}: {item['error']}")
     if len(record.get("failed_items", [])) > 10:

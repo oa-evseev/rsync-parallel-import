@@ -151,6 +151,36 @@ class CliTests(unittest.TestCase):
                 self.assertEqual(main(["--config", str(config_path), "status", "--json"]), 0)
                 self.assertTrue(stdout.write.called)
 
+    def test_status_distinguishes_current_and_historical_retry_errors(self):
+        transient = {
+            "phase": "transfer",
+            "percentage": 1.0,
+            "transferred_bytes": 1,
+            "total_bytes": 100,
+            "rate_bytes_per_second": 0,
+            "eta_seconds": None,
+            "active_workers": 1,
+            "total_workers": 2,
+            "retry_count": 1,
+            "failed_count": 0,
+            "failed_items": [],
+            "last_error": None,
+            "last_transient_error": "connection reset",
+        }
+        rendered = human_status(transient)
+        self.assertNotIn("current error:", rendered)
+        self.assertIn("historical transient error: connection reset", rendered)
+
+        terminal = dict(transient)
+        terminal.update(
+            last_error="permission denied",
+            failed_count=1,
+            failed_items=[{"path": "large.bin", "error": "permission denied"}],
+        )
+        rendered = human_status(terminal)
+        self.assertIn("current error: permission denied", rendered)
+        self.assertIn("failed: large.bin: permission denied", rendered)
+
     def test_reset_requires_confirmation_and_never_touches_destination(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

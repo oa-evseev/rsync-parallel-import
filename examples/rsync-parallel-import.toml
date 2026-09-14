@@ -13,9 +13,10 @@ path = "/var/lib/rsync-parallel-import"
 
 [transfer]
 workers = 16
+worker_start_stagger_seconds = 0.2
 max_attempts = 5
 backoff_initial_seconds = 5
 backoff_max_seconds = 300
+retry_jitter_fraction = 0.2
 poll_interval_seconds = 2
 rate_window_seconds = 60
-

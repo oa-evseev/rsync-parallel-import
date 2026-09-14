@@ -32,6 +32,8 @@ class ConfigTests(unittest.TestCase):
             config = load_config(path)
             self.assertEqual(config.source.target, "user@host")
             self.assertEqual(config.transfer.workers, 16)
+            self.assertEqual(config.transfer.worker_start_stagger_seconds, 0.2)
+            self.assertEqual(config.transfer.retry_jitter_fraction, 0.2)
             self.assertEqual(config.state_dir, Path("/var/lib/rsync-parallel-import"))
             self.assertEqual(config.transfer.max_attempts, 5)
 
@@ -42,6 +44,11 @@ class ConfigTests(unittest.TestCase):
             '[source]\nhost="h"\nuser="u"\npath="/s"\n[destination]\npath="d"\n[transfer]\nworkers=0',
             '[source]\nhost="h"\nuser="u"\npath="/s"\n[destination]\npath="/d"\n[transfer]\nworkers=true',
             '[source]\nhost="h"\nuser="u"\npath="/s"\n[destination]\npath="/d"\n[transfer]\nworkers=1\npartial_dir_name="a/b"',
+            '[source]\nhost="h"\nuser="u"\npath="/s"\n[destination]\npath="/d"\n[transfer]\nworkers=1\nworker_start_stagger_seconds=-0.1',
+            '[source]\nhost="h"\nuser="u"\npath="/s"\n[destination]\npath="/d"\n[transfer]\nworkers=1\nworker_start_stagger_seconds=inf',
+            '[source]\nhost="h"\nuser="u"\npath="/s"\n[destination]\npath="/d"\n[transfer]\nworkers=1\nretry_jitter_fraction=-0.1',
+            '[source]\nhost="h"\nuser="u"\npath="/s"\n[destination]\npath="/d"\n[transfer]\nworkers=1\nretry_jitter_fraction=1.01',
+            '[source]\nhost="h"\nuser="u"\npath="/s"\n[destination]\npath="/d"\n[transfer]\nworkers=1\nretry_jitter_fraction=nan',
         ]
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "config.toml"
@@ -49,6 +56,19 @@ class ConfigTests(unittest.TestCase):
                 path.write_text(text, encoding="utf-8")
                 with self.subTest(text=text), self.assertRaises(ConfigurationError):
                     load_config(path)
+
+    def test_zero_stagger_and_retry_jitter_are_valid(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "config.toml"
+            path.write_text(
+                '[source]\nhost="h"\nuser="u"\npath="/s"\n'
+                '[destination]\npath="/d"\n[transfer]\nworkers=1\n'
+                'worker_start_stagger_seconds=0\nretry_jitter_fraction=0\n',
+                encoding="utf-8",
+            )
+            transfer = load_config(path).transfer
+            self.assertEqual(transfer.worker_start_stagger_seconds, 0)
+            self.assertEqual(transfer.retry_jitter_fraction, 0)
 
 
 class ManifestTests(unittest.TestCase):

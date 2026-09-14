@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -14,10 +15,67 @@ from rsync_parallel_import.progress import (
     newly_crossed_thresholds,
     transferred_bytes,
 )
-from rsync_parallel_import.state import StateStore, initialize_state
+from rsync_parallel_import.state import STATE_VERSION, StateStore, initialize_state
 
 
 class StateTests(unittest.TestCase):
+    def test_version_1_state_migrates_without_losing_import_progress(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "state.json"
+            path.write_text(
+                json.dumps(
+                    {
+                        "version": 1,
+                        "manifest_digest": "digest",
+                        "phase": "transfer",
+                        "completed": ["done-id"],
+                        "failed": {},
+                        "attempts": {"retry-id": 2},
+                        "retry_count": 7,
+                        "thresholds_emitted": [10, 20, 30],
+                        "progress": {
+                            "transferred_bytes": 40,
+                            "total_bytes": 100,
+                            "rate_bytes_per_second": 5.0,
+                            "eta_seconds": 12.0,
+                            "active_workers": 1,
+                            "total_workers": 16,
+                        },
+                        "last_error": "old transient reset",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            state = StateStore(path).load()
+            self.assertEqual(state.version, STATE_VERSION)
+            self.assertEqual(state.completed, {"done-id"})
+            self.assertEqual(state.attempts, {"retry-id": 2})
+            self.assertEqual(state.retry_count, 7)
+            self.assertEqual(state.thresholds_emitted, {10, 20, 30})
+            self.assertEqual((state.transferred_bytes, state.total_bytes), (40, 100))
+            self.assertIsNone(state.last_error)
+            self.assertEqual(state.last_transient_error, "old transient reset")
+
+    def test_version_1_terminal_error_remains_current(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "state.json"
+            path.write_text(
+                json.dumps(
+                    {
+                        "version": 1,
+                        "manifest_digest": "digest",
+                        "phase": "failed",
+                        "failed": {"failed-id": "permission denied"},
+                        "last_error": "permission denied",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            state = StateStore(path).load()
+            self.assertEqual(state.failed, {"failed-id": "permission denied"})
+            self.assertEqual(state.last_error, "permission denied")
+            self.assertIsNone(state.last_transient_error)
+
     def test_atomic_state_preserves_old_file_when_replace_fails(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "state.json"

@@ -107,9 +107,11 @@ path = "/var/lib/rsync-parallel-import"
 
 [transfer]
 workers = 16
+worker_start_stagger_seconds = 0.2
 max_attempts = 5
 backoff_initial_seconds = 5
 backoff_max_seconds = 300
+retry_jitter_fraction = 0.2
 poll_interval_seconds = 2
 rate_window_seconds = 60
 partial_dir_name = ".rsync-parallel-import-partial"
@@ -126,9 +128,11 @@ Transfer settings:
 | Key | Default | Meaning |
 | --- | ---: | --- |
 | `workers` | 16 | Maximum concurrent rsync processes |
+| `worker_start_stagger_seconds` | 0.2 | Minimum spacing between new worker process starts; `0` disables staggering |
 | `max_attempts` | 5 | Total failed attempts allowed for an assigned file before terminal failure |
 | `backoff_initial_seconds` | 5 | Delay after the first failure |
 | `backoff_max_seconds` | 300 | Exponential-backoff cap |
+| `retry_jitter_fraction` | 0.2 | Random retry-delay variation (approximately ± this fraction, from 0 to 1); `0` disables jitter |
 | `poll_interval_seconds` | 2 | Progress and worker polling interval |
 | `rate_window_seconds` | 60 | Rolling throughput window |
 | `partial_dir_name` | `.rsync-parallel-import-partial` | Reserved per-directory rsync partial area |
@@ -162,10 +166,16 @@ Do not edit these files. Both JSON data files use atomic replacement and the
 manifest has an integrity digest. If initialisation is interrupted after the
 manifest write but before the state write, `run` safely reconstructs an empty
 state from that existing manifest—it does not rescan the source.
+State files written by version 1.0.0 load without reset and are upgraded on the
+next state write without losing completed work, attempts, retries, progress, or
+threshold notifications.
 
 Normal network failures affect only the relevant worker. The assignment is
-retried with capped exponential backoff, while healthy workers continue. rsync
-uses archive and partial semantics on every attempt. A controller process crash
+retried with capped exponential backoff and configurable jitter, while healthy
+workers continue. New worker processes are started with a small configurable
+spacing to avoid an SSH connection burst; this does not reduce the configured
+maximum concurrency once workers are running. rsync uses archive and partial
+semantics on every attempt. A controller process crash
 or host reboot leaves the manifest, completed assignments, retry counts, and
 threshold notifications on disk; the next `run` resumes them.
 
@@ -189,10 +199,13 @@ rsync-parallel-import --config /etc/rsync-parallel-import.toml status --json
 
 Status includes phase, logical manifested bytes transferred/total, percentage,
 recent aggregate rate, ETA, active/configured workers, retries, terminal failed
-paths, and the last error. Finished destination files count up to their expected
-size. Resting rsync partial files count when their manifested path can be
-identified. The controller also recognizes rsync's receiver-side
-`.name.XXXXXX` temporary file shape while a worker is active. Very long names
+paths, any current error, and the most recent historical transient retry error.
+The cumulative retry count and last transient diagnostic remain visible after
+recovery, without presenting that diagnostic as a current failure. Finished
+destination files count up to their expected size. Resting rsync partial files
+count when their manifested path can be identified. The controller also
+recognizes rsync's receiver-side `.name.XXXXXX` temporary file shape while a
+worker is active. Very long names
 that rsync must truncate, or a nonstandard rsync temporary naming scheme, may
 not contribute until rsync finishes or parks the file in the partial directory.
 

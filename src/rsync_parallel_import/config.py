@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import os
 import tomllib
 from dataclasses import dataclass
@@ -31,6 +32,8 @@ class TransferConfig:
     rate_window_seconds: float = 60.0
     ssh_check_timeout_seconds: float = 15.0
     partial_dir_name: str = ".rsync-parallel-import-partial"
+    worker_start_stagger_seconds: float = 0.2
+    retry_jitter_fraction: float = 0.2
 
 
 @dataclass(frozen=True)
@@ -47,9 +50,11 @@ _DEST_KEYS = {"path"}
 _STATE_KEYS = {"path"}
 _TRANSFER_KEYS = {
     "workers",
+    "worker_start_stagger_seconds",
     "max_attempts",
     "backoff_initial_seconds",
     "backoff_max_seconds",
+    "retry_jitter_fraction",
     "poll_interval_seconds",
     "rate_window_seconds",
     "ssh_check_timeout_seconds",
@@ -81,8 +86,31 @@ def _nonempty_string(table: dict[str, Any], key: str, label: str) -> str:
 
 def _number(table: dict[str, Any], key: str, default: float) -> float:
     value = table.get(key, default)
-    if isinstance(value, bool) or not isinstance(value, (int, float)) or value <= 0:
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, (int, float))
+        or not math.isfinite(value)
+        or value <= 0
+    ):
         raise ConfigurationError(f"[transfer].{key} must be a positive number")
+    return float(value)
+
+
+def _bounded_nonnegative_number(
+    table: dict[str, Any], key: str, default: float, maximum: float | None = None
+) -> float:
+    value = table.get(key, default)
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, (int, float))
+        or not math.isfinite(value)
+        or value < 0
+        or (maximum is not None and value > maximum)
+    ):
+        range_description = "a non-negative finite number"
+        if maximum is not None:
+            range_description += f" no greater than {maximum:g}"
+        raise ConfigurationError(f"[transfer].{key} must be {range_description}")
     return float(value)
 
 
@@ -161,9 +189,15 @@ def load_config(path: str | os.PathLike[str]) -> Config:
         state_dir=state_path,
         transfer=TransferConfig(
             workers=workers,
+            worker_start_stagger_seconds=_bounded_nonnegative_number(
+                transfer, "worker_start_stagger_seconds", 0.2
+            ),
             max_attempts=max_attempts,
             backoff_initial_seconds=initial,
             backoff_max_seconds=maximum,
+            retry_jitter_fraction=_bounded_nonnegative_number(
+                transfer, "retry_jitter_fraction", 0.2, 1.0
+            ),
             poll_interval_seconds=_number(transfer, "poll_interval_seconds", 2.0),
             rate_window_seconds=_number(transfer, "rate_window_seconds", 60.0),
             ssh_check_timeout_seconds=_number(transfer, "ssh_check_timeout_seconds", 15.0),

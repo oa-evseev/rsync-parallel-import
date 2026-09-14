@@ -9,7 +9,8 @@ from typing import Any, Callable
 from .errors import StateError
 from .util import atomic_write_json, load_json
 
-STATE_VERSION = 1
+STATE_VERSION = 2
+LEGACY_STATE_VERSION = 1
 PHASES = {"initialized", "transfer", "reconciliation", "completed", "failed"}
 
 
@@ -29,6 +30,7 @@ class TransferState:
     active_workers: int = 0
     total_workers: int = 0
     last_error: str | None = None
+    last_transient_error: str | None = None
     version: int = STATE_VERSION
 
     def validate(self) -> None:
@@ -50,6 +52,12 @@ class TransferState:
             raise StateError("state contains an invalid progress threshold")
         if min(self.transferred_bytes, self.total_bytes, self.retry_count) < 0:
             raise StateError("state contains a negative counter")
+        if self.last_error is not None and not isinstance(self.last_error, str):
+            raise StateError("state contains an invalid current error")
+        if self.last_transient_error is not None and not isinstance(
+            self.last_transient_error, str
+        ):
+            raise StateError("state contains an invalid transient error")
 
     def record(self) -> dict[str, Any]:
         self.validate()
@@ -71,18 +79,36 @@ class TransferState:
                 "total_workers": self.total_workers,
             },
             "last_error": self.last_error,
+            "last_transient_error": self.last_transient_error,
         }
 
     @classmethod
     def from_record(cls, data: Any) -> "TransferState":
         try:
+            version = int(data["version"])
+            if version not in {LEGACY_STATE_VERSION, STATE_VERSION}:
+                raise StateError(f"unsupported state version: {version!r}")
             progress = data.get("progress", {})
+            failed = dict(data.get("failed", {}))
+            phase = str(data["phase"])
+            legacy_error = data.get("last_error")
+            if version == LEGACY_STATE_VERSION:
+                # Version 1 used last_error for both active failures and old,
+                # retryable worker failures. Preserve terminal errors as current
+                # and migrate nonterminal ones into explicit retry history.
+                last_error = legacy_error if failed or phase == "failed" else None
+                last_transient_error = (
+                    None if failed or phase == "failed" else legacy_error
+                )
+            else:
+                last_error = legacy_error
+                last_transient_error = data.get("last_transient_error")
             state = cls(
-                version=int(data["version"]),
+                version=STATE_VERSION,
                 manifest_digest=str(data["manifest_digest"]),
-                phase=str(data["phase"]),
+                phase=phase,
                 completed=set(data.get("completed", [])),
-                failed=dict(data.get("failed", {})),
+                failed=failed,
                 attempts={key: int(value) for key, value in data.get("attempts", {}).items()},
                 retry_count=int(data.get("retry_count", 0)),
                 thresholds_emitted={int(value) for value in data.get("thresholds_emitted", [])},
@@ -94,7 +120,8 @@ class TransferState:
                 ),
                 active_workers=int(progress.get("active_workers", 0)),
                 total_workers=int(progress.get("total_workers", 0)),
-                last_error=data.get("last_error"),
+                last_error=last_error,
+                last_transient_error=last_transient_error,
             )
             state.validate()
             return state
